@@ -18,6 +18,7 @@ use create_type_spec_derive::CreateTypeSpec;
 pub struct ContractState {
     owner: Address,
     registry_address: Address,
+    next_vc_id: u128,
     vcs: AvlTreeMap<String, SortedVecMap<u128, VC>>, // Key: DID, Value: VC Map {Key: VC ID, Value: VC Content}
 }
 
@@ -31,6 +32,7 @@ fn initialize(
     let state = ContractState {
         owner: ctx.sender,
         registry_address: blank_address,
+        next_vc_id: 0,
         vcs: vc_storage,
     };
 
@@ -73,7 +75,6 @@ pub fn upload_vc(
     context: ContractContext,
     state: ContractState,
     issuer_did: String,
-    vc_id: u128,
     subject_did: String,
     subject_info: Vec<SubjectInfo>,
     valid_since: String,
@@ -104,7 +105,6 @@ pub fn upload_vc(
     event_group_builder
         .with_callback(SHORTNAME_UPLOAD_VC_CALLBACK)
         .argument(issuer_did)
-        .argument(vc_id)
         .argument(new_vc)
         .done();
 
@@ -117,22 +117,22 @@ pub fn upload_vc_callback(
     callback_context: CallbackContext,
     mut state: ContractState,
     issuer_did: String,
-    vc_id: u128,
     new_vc: VC,
 ) -> (ContractState, Vec<EventGroup>) {
     assert!(callback_context.success, "DID Not Registered or Not Authorized!");
 
     if state.vcs.contains_key(&issuer_did) {
         let mut vcs_map = state.vcs.get(&issuer_did).unwrap();
-        assert!(!vcs_map.contains_key(&vc_id), "VC Exists!");
         
-        vcs_map.insert(vc_id, new_vc);
+        vcs_map.insert(state.next_vc_id, new_vc);
 
     } else {
         let mut vcs_map : SortedVecMap<u128, VC> = SortedVecMap::new();
-        vcs_map.insert(vc_id, new_vc);
+        vcs_map.insert(state.next_vc_id, new_vc);
         state.vcs.insert(issuer_did, vcs_map);
     }
+
+    state.next_vc_id += 1;
 
     (state, vec![])
 }
