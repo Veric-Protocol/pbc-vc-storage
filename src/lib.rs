@@ -128,13 +128,14 @@ pub fn upload_vc_callback(
         .unwrap_or_else(|| panic!("No VC map for issuer {}", issuer_did));
         
         vcs_map.insert(state.next_vc_id, new_vc);
+        state.vcs.insert(issuer_did, vcs_map);
 
     } else {
         let mut vcs_map : SortedVecMap<u128, VC> = SortedVecMap::new();
         vcs_map.insert(state.next_vc_id, new_vc);
+        state.vcs.insert(issuer_did, vcs_map);
     }
-    
-    state.vcs.insert(issuer_did, vcs_map);
+
     state.next_vc_id += 1;
 
     (state, vec![])
