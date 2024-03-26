@@ -8,6 +8,7 @@ use pbc_contract_common::context::{ContractContext, CallbackContext};
 use pbc_contract_common::events::EventGroup;
 use pbc_contract_common::shortname::Shortname;
 use pbc_contract_common::sorted_vec_map::SortedVecMap;
+use pbc_contract_common::avl_tree_map::AvlTreeMap;
 use read_write_state_derive::ReadWriteState;
 use read_write_rpc_derive::ReadWriteRPC;
 use create_type_spec_derive::CreateTypeSpec;
@@ -17,7 +18,8 @@ use create_type_spec_derive::CreateTypeSpec;
 pub struct ContractState {
     owner: Address,
     registry_address: Address,
-    vcs: SortedVecMap<String, SortedVecMap<u128, VC>>, // Key: DID, Value: VC Map {Key: VC ID, Value: VC Content}
+    next_vc_id: u128,
+    vcs: AvlTreeMap<String, SortedVecMap<u128, VC>>, // Key: DID, Value: VC Map {Key: VC ID, Value: VC Content}
 }
 
 #[init]
@@ -25,11 +27,12 @@ fn initialize(
     ctx: ContractContext,
 ) -> ContractState {
 
-    let vc_storage: SortedVecMap<String, SortedVecMap<u128, VC>> = SortedVecMap::new();
+    let vc_storage: AvlTreeMap<String, SortedVecMap<u128, VC>> = AvlTreeMap::new();
     let blank_address: Address = Address { address_type: AddressType::Account, identifier: [0x00; 20] };
     let state = ContractState {
         owner: ctx.sender,
         registry_address: blank_address,
+        next_vc_id: 0,
         vcs: vc_storage,
     };
 
@@ -72,7 +75,6 @@ pub fn upload_vc(
     context: ContractContext,
     state: ContractState,
     issuer_did: String,
-    vc_id: u128,
     subject_did: String,
     subject_info: Vec<SubjectInfo>,
     valid_since: String,
@@ -103,7 +105,6 @@ pub fn upload_vc(
     event_group_builder
         .with_callback(SHORTNAME_UPLOAD_VC_CALLBACK)
         .argument(issuer_did)
-        .argument(vc_id)
         .argument(new_vc)
         .done();
 
@@ -116,22 +117,26 @@ pub fn upload_vc_callback(
     callback_context: CallbackContext,
     mut state: ContractState,
     issuer_did: String,
-    vc_id: u128,
     new_vc: VC,
 ) -> (ContractState, Vec<EventGroup>) {
     assert!(callback_context.success, "DID Not Registered or Not Authorized!");
 
     if state.vcs.contains_key(&issuer_did) {
-        let vcs_map = state.vcs.get_mut(&issuer_did).unwrap();
-        assert!(!vcs_map.contains_key(&vc_id), "VC Exists!");
+        let mut vcs_map = state
+        .vcs
+        .get(&issuer_did)
+        .unwrap_or_else(|| panic!("No VC map for issuer {}", issuer_did));
         
-        vcs_map.insert(vc_id, new_vc);
+        vcs_map.insert(state.next_vc_id, new_vc);
+        state.vcs.insert(issuer_did, vcs_map);
 
     } else {
         let mut vcs_map : SortedVecMap<u128, VC> = SortedVecMap::new();
-        vcs_map.insert(vc_id, new_vc);
+        vcs_map.insert(state.next_vc_id, new_vc);
         state.vcs.insert(issuer_did, vcs_map);
     }
+
+    state.next_vc_id += 1;
 
     (state, vec![])
 }
@@ -171,7 +176,7 @@ pub fn set_revoke(
 pub fn set_revoke_callback(
     _context: ContractContext,
     callback_context: CallbackContext,
-    mut state: ContractState,
+    state: ContractState,
     issuer_did: String,
     vc_id: u128,
     is_revoked: bool,
@@ -179,7 +184,7 @@ pub fn set_revoke_callback(
     assert!(callback_context.success, "DID Not Registered or Not Authorized!");
     assert!(state.vcs.contains_key(&issuer_did), "VC Not Exist!");
 
-    let vcs_map = state.vcs.get_mut(&issuer_did).unwrap();
+    let mut vcs_map = state.vcs.get(&issuer_did).unwrap();
     assert!(vcs_map.contains_key(&vc_id), "VC Not Exist!");
     
     vcs_map.get_mut(&vc_id).unwrap().revoked = is_revoked;
